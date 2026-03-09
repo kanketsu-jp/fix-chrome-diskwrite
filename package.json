@@ -4,7 +4,7 @@
   "description": "Fix Chrome crashes caused by Gemini Nano disk writes on macOS",
   "type": "module",
   "bin": {
-    "fix-chrome-diskwrite": "./cli.js"
+    "fix-chrome-diskwrite": "cli.js"
   },
   "files": [
     "cli.js",
@@ -24,6 +24,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kanketsu-jp/fix-chrome-diskwrite"
+    "url": "git+https://github.com/kanketsu-jp/fix-chrome-diskwrite.git"
   }
 }
