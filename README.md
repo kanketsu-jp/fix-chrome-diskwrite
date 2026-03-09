@@ -35,6 +35,7 @@ Chrome を再起動して `chrome://policy` を開く。`GenAILocalFoundationalM
 
 ## 参考
 
+- [Chrome が突然落ちる原因は Gemini Nano だった — 調査と対処法](https://zenn.dev/kazuma_horiike/articles/0f7ba42b65951e)
 - [GenAILocalFoundationalModelSettings - Chrome Enterprise Policy](https://chromeenterprise.google/policies/#GenAILocalFoundationalModelSettings)
 - [How to disable the browser from downloading model files - Chromium Dev Group](https://groups.google.com/a/chromium.org/g/chrome-ai-dev-preview-discuss/c/t6fqOnTzA_g)
 
