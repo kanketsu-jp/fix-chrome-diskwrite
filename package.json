@@ -1,6 +1,6 @@
 {
   "name": "fix-chrome-diskwrite",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Fix Chrome crashes caused by Gemini Nano disk writes on macOS",
   "type": "module",
   "bin": {
