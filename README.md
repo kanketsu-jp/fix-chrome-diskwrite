@@ -23,10 +23,28 @@ npx fix-chrome-diskwrite
 curl -fsSL https://raw.githubusercontent.com/kanketsu-jp/fix-chrome-diskwrite/main/bin/fix.sh | bash
 ```
 
+### オプション: optimization_guide_model_store の無効化
+
+Gemini Nano 以外にも Chrome は `optimization_guide_model_store/` に最適化用モデルを自動ダウンロードする。これもディスク書き込み量を押し上げるため、`--opt-guide` オプションで既存データを削除できる。
+
+```bash
+npx fix-chrome-diskwrite --opt-guide
+```
+
+`--schedule` を付けると macOS LaunchAgent を登録し、1時間ごとに自動削除する。
+
+```bash
+npx fix-chrome-diskwrite --opt-guide --schedule
+```
+
+> **注意**: `optimization_guide_model_store` を無効化する公式 Enterprise Policy は存在しないため、Chrome 再起動後に再生成される。`--schedule` での自動削除を推奨。
+
 ### 元に戻す
 
 ```bash
 npx fix-chrome-diskwrite --undo
+# LaunchAgent も削除する場合
+npx fix-chrome-diskwrite --undo --opt-guide --schedule
 ```
 
 ## 確認方法
