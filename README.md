@@ -57,6 +57,30 @@ Chrome を再起動して `chrome://policy` を開く。`GenAILocalFoundationalM
 - [GenAILocalFoundationalModelSettings - Chrome Enterprise Policy](https://chromeenterprise.google/policies/#GenAILocalFoundationalModelSettings)
 - [How to disable the browser from downloading model files - Chromium Dev Group](https://groups.google.com/a/chromium.org/g/chrome-ai-dev-preview-discuss/c/t6fqOnTzA_g)
 
+## おまけ: macOS の .DS_Store をリモート/USB ドライブに作らせない
+
+Google Workspace（Google Drive）や NAS などのネットワークマウント、USB ドライブに `.DS_Store` が生成されるのを防ぐワンライナー。
+
+```bash
+defaults write com.apple.desktopservices DSDontWriteNetworkStores -bool true && defaults write com.apple.desktopservices DSDontWriteUSBStores -bool true
+```
+
+設定後、ログアウト→ログイン（または再起動）で反映される。
+
+確認:
+
+```bash
+defaults read com.apple.desktopservices
+```
+
+元に戻す:
+
+```bash
+defaults delete com.apple.desktopservices DSDontWriteNetworkStores && defaults delete com.apple.desktopservices DSDontWriteUSBStores
+```
+
+> **注意**: ローカルディスクの `.DS_Store` は Finder の表示設定に使われるため、無効化する公式手段はない。
+
 ## License
 
 MIT
