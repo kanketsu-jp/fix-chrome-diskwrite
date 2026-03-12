@@ -1,11 +1,33 @@
 # fix-chrome-diskwrite
 
-Chrome が Gemini Nano の AI モデル（4GB）を無断でダウンロードし、macOS のディスク書き込み制限を超過してクラッシュする問題を修正する。
+Chrome の過剰なディスク書き込みにより macOS の書き込み制限を超過してクラッシュする問題を修正する。
+
+## 原因
+
+Chrome は以下のデータを自動ダウンロード・書き込みし、macOS の disk writes 制限（約 2GB/24h）を超過すると OS に強制終了される。
+
+- **Gemini Nano AI モデル**（`OptGuideOnDeviceModel/` 約 4GB）
+- **optimization_guide_model_store**（最適化用モデル、再起動のたびに再生成）
+- **screen_ai**（OCR/アクセシビリティ AI、約 123MB）
+- **WasmTtsEngine**（テキスト読み上げ、約 22MB）
+- **component_crx_cache**（コンポーネントキャッシュ、約 157MB）
+- その他コンポーネントの自動更新
 
 ## やること
 
-1. Chrome の Enterprise Policy `GenAILocalFoundationalModelSettings=1` を設定（モデルの自動ダウンロードを禁止）
-2. 既存のモデルデータ（`OptGuideOnDeviceModel/`）を削除（約 4GB 解放）
+1. Enterprise Policy `GenAILocalFoundationalModelSettings=1` を設定（Gemini Nano の自動ダウンロードを禁止）
+2. 既存のモデルデータ（`OptGuideOnDeviceModel/`）を削除
+
+### `--full` オプション（推奨）
+
+上記に加えて以下も適用:
+
+3. コンポーネント自動更新を停止（`ComponentUpdatesEnabled=false`）
+4. ScreenAI・TTS・バックグラウンドモードを無効化
+5. Chrome 内蔵パスワードマネージャー・自動入力を無効化（macOS の `SafariPlatformSupport.Helper` クラッシュ防止）
+6. 追加コンポーネントデータの削除（screen_ai, WasmTtsEngine, component_crx_cache 等）
+
+> **注意**: Chrome 内蔵パスワードマネージャーの無効化は 1Password 等の拡張機能に影響しません。
 
 ## 使い方
 
@@ -14,42 +36,52 @@ Chrome を終了してから実行。
 ### npx（推奨）
 
 ```bash
+# 基本（Gemini Nano のみ）
 npx fix-chrome-diskwrite
+
+# フル対策（推奨）
+npx fix-chrome-diskwrite --full
+
+# フル対策 + optimization_guide_model_store 自動削除
+npx fix-chrome-diskwrite --full --opt-guide --schedule
 ```
 
 ### curl
 
 ```bash
+# 基本
 curl -fsSL https://raw.githubusercontent.com/kanketsu-jp/fix-chrome-diskwrite/main/bin/fix.sh | bash
+
+# フル対策
+curl -fsSL https://raw.githubusercontent.com/kanketsu-jp/fix-chrome-diskwrite/main/bin/fix.sh | bash -s -- --full
+
+# フル対策 + optimization_guide_model_store 自動削除
+curl -fsSL https://raw.githubusercontent.com/kanketsu-jp/fix-chrome-diskwrite/main/bin/fix.sh | bash -s -- --full --opt-guide --schedule
 ```
 
-### オプション: optimization_guide_model_store の無効化
+### オプション一覧
 
-Gemini Nano 以外にも Chrome は `optimization_guide_model_store/` に最適化用モデルを自動ダウンロードする。これもディスク書き込み量を押し上げるため、`--opt-guide` オプションで既存データを削除できる。
-
-```bash
-npx fix-chrome-diskwrite --opt-guide
-```
-
-`--schedule` を付けると macOS LaunchAgent を登録し、1時間ごとに自動削除する。
-
-```bash
-npx fix-chrome-diskwrite --opt-guide --schedule
-```
-
-> **注意**: `optimization_guide_model_store` を無効化する公式 Enterprise Policy は存在しないため、Chrome 再起動後に再生成される。`--schedule` での自動削除を推奨。
+| オプション | 説明 |
+|---|---|
+| (なし) | Gemini Nano の DL 禁止 + 既存モデル削除 |
+| `--full` | コンポーネント更新停止・ScreenAI/TTS 無効化・内蔵パスワードマネージャー無効化・追加データ削除 |
+| `--opt-guide` | `optimization_guide_model_store` も削除 |
+| `--schedule` | LaunchAgent で 1 時間ごとに `optimization_guide_model_store` を自動削除（`--opt-guide` と併用） |
+| `--undo` | すべての設定を元に戻す（`--full`, `--opt-guide --schedule` と併用可） |
 
 ### 元に戻す
 
 ```bash
+# 基本設定のみ元に戻す
 npx fix-chrome-diskwrite --undo
-# LaunchAgent も削除する場合
-npx fix-chrome-diskwrite --undo --opt-guide --schedule
+
+# すべて元に戻す
+npx fix-chrome-diskwrite --undo --full --opt-guide --schedule
 ```
 
 ## 確認方法
 
-Chrome を再起動して `chrome://policy` を開く。`GenAILocalFoundationalModelSettings` が `1` になっていれば OK。
+Chrome を再起動して `chrome://policy` を開く。設定したポリシーが反映されていれば OK。
 
 ## 参考
 
