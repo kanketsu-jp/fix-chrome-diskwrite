@@ -4,6 +4,8 @@ Chrome の過剰なディスク書き込みにより macOS の書き込み制限
 
 ## 原因
 
+### ディスク書き込み超過クラッシュ
+
 Chrome は以下のデータを自動ダウンロード・書き込みし、macOS の disk writes 制限（約 2GB/24h）を超過すると OS に強制終了される。
 
 - **Gemini Nano AI モデル**（`OptGuideOnDeviceModel/` 約 4GB）
@@ -12,6 +14,10 @@ Chrome は以下のデータを自動ダウンロード・書き込みし、macO
 - **WasmTtsEngine**（テキスト読み上げ、約 22MB）
 - **component_crx_cache**（コンポーネントキャッシュ、約 157MB）
 - その他コンポーネントの自動更新
+
+### クラッシュループ
+
+ディスク書き込み超過などで Chrome が一度クラッシュすると、Preferences に `exit_type: Crashed` が記録される。次回起動時に Chrome は前回のセッション（大量のタブや Google Meet 等）を一斉復元しようとし、再びクラッシュ → 起動 → クラッシュを繰り返す「クラッシュループ」に陥ることがある。
 
 ## やること
 
@@ -66,8 +72,34 @@ curl -fsSL https://raw.githubusercontent.com/kanketsu-jp/fix-chrome-diskwrite/ma
 | (なし) | Gemini Nano の DL 禁止 + 既存モデル削除 |
 | `--full` | コンポーネント更新停止・ScreenAI/TTS 無効化・内蔵パスワードマネージャー無効化・追加データ削除 |
 | `--opt-guide` | `optimization_guide_model_store` も削除 |
-| `--schedule` | LaunchAgent で 1 時間ごとに `optimization_guide_model_store` を自動削除（`--opt-guide` と併用） |
+| `--schedule` | LaunchAgent で 1 時間ごとにキャッシュを自動クリーンアップ（`--opt-guide` と併用）。Chrome 未起動時のみ、100MB 超のキャッシュを削除 |
+| `--fix-crash-loop` | クラッシュループを修復（全プロファイルの `exit_type` リセット + セッションファイル削除） |
 | `--undo` | すべての設定を元に戻す（`--full`, `--opt-guide --schedule` と併用可） |
+
+### クラッシュループの修復
+
+Chrome が「起動 → すぐクラッシュ → 再起動」を繰り返す場合:
+
+```bash
+npx fix-chrome-diskwrite --fix-crash-loop
+```
+
+これは全プロファイル（Default, Profile 2, ...）に対して以下を行う:
+- Preferences の `exit_type` を `Crashed` → `Normal` にリセット
+- 破損したセッションファイルをバックアップして削除
+
+修復後、Chrome は空の新しいタブで起動する。以前のタブは `chrome://history` から個別に復元できる。
+
+### 定期キャッシュクリーンアップ（`--schedule`）
+
+`--opt-guide --schedule` を指定すると、1 時間ごとに以下を自動クリーンアップする LaunchAgent が登録される:
+
+- `optimization_guide_model_store`、`GraphiteDawnCache`、`BrowserMetrics` 等の共有キャッシュ
+- 各プロファイルの `Service Worker/CacheStorage`、`DawnWebGPUCache`、`DIPS-wal`
+
+Chrome が起動中の場合はスキップされる（起動中に削除するとタブがクラッシュするため）。各ディレクトリが 100MB を超えた場合のみ削除される。Chrome は次回起動時に必要なキャッシュを小さいサイズから再生成する。
+
+ログは `~/Library/Logs/fix-chrome-diskwrite-cleanup.log` に記録される。
 
 ### 元に戻す
 

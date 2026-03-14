@@ -9,10 +9,11 @@
 #   4. Chrome 内蔵パスワードマネージャー・自動入力を無効化 (SafariPlatformSupport.Helper クラッシュ防止)
 #
 # オプション:
-#   --opt-guide  optimization_guide_model_store も削除する
-#   --schedule   LaunchAgent を登録し、毎時自動で optimization_guide_model_store を削除する (--opt-guide と併用)
-#   --full       コンポーネント更新抑制・ScreenAI・TTS 無効化・内蔵パスワードマネージャー無効化をすべて適用
-#   --undo       設定を元に戻す (--opt-guide --schedule と併用で LaunchAgent も削除)
+#   --opt-guide        optimization_guide_model_store も削除する
+#   --schedule         LaunchAgent を登録し、毎時自動で optimization_guide_model_store を削除する (--opt-guide と併用)
+#   --full             コンポーネント更新抑制・ScreenAI・TTS 無効化・内蔵パスワードマネージャー無効化をすべて適用
+#   --fix-crash-loop   クラッシュループを修復する (exit_type リセット + セッションファイルのバックアップ・削除)
+#   --undo             設定を元に戻す (--opt-guide --schedule と併用で LaunchAgent も削除)
 #
 # 使い方:
 #   curl -fsSL https://raw.githubusercontent.com/kanketsu-jp/fix-chrome-diskwrite/main/bin/fix.sh | bash
@@ -29,8 +30,9 @@ CHROME_BASE="$HOME/Library/Application Support/Google/Chrome"
 MODEL_DIR="$CHROME_BASE/OptGuideOnDeviceModel"
 OPT_GUIDE_DIR="$CHROME_BASE/optimization_guide_model_store"
 POLICY_KEY="GenAILocalFoundationalModelSettings"
-LAUNCH_AGENT_LABEL="com.fix-chrome-diskwrite.opt-guide-cleanup"
+LAUNCH_AGENT_LABEL="com.fix-chrome-diskwrite.cleanup"
 LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/$LAUNCH_AGENT_LABEL.plist"
+CLEANUP_SCRIPT="$HOME/.local/bin/fix-chrome-diskwrite-cleanup.sh"
 
 # --full で削除する追加コンポーネント
 EXTRA_DIRS=(
@@ -47,12 +49,14 @@ OPT_GUIDE=false
 SCHEDULE=false
 UNDO=false
 FULL=false
+FIX_CRASH_LOOP=false
 for arg in "$@"; do
   case "$arg" in
     --undo) UNDO=true ;;
     --opt-guide) OPT_GUIDE=true ;;
     --schedule) SCHEDULE=true ;;
     --full) FULL=true ;;
+    --fix-crash-loop) FIX_CRASH_LOOP=true ;;
   esac
 done
 
@@ -69,13 +73,20 @@ if $UNDO; then
     done
   fi
   if $OPT_GUIDE && $SCHEDULE; then
-    if launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" 2>/dev/null; then
-      echo "  LaunchAgent 停止: $LAUNCH_AGENT_LABEL"
+    # 新旧どちらの LaunchAgent も削除
+    for label in "$LAUNCH_AGENT_LABEL" "com.fix-chrome-diskwrite.opt-guide-cleanup"; do
+      plist="$HOME/Library/LaunchAgents/$label.plist"
+      if [ -f "$plist" ]; then
+        launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
+        rm -f "$plist"
+        echo "  LaunchAgent 削除: $label"
+      fi
+    done
+    if [ -f "$CLEANUP_SCRIPT" ]; then
+      rm -f "$CLEANUP_SCRIPT"
+      echo "  スクリプト削除: $CLEANUP_SCRIPT"
     fi
-    if [ -f "$LAUNCH_AGENT_PLIST" ]; then
-      rm -f "$LAUNCH_AGENT_PLIST"
-      echo "  LaunchAgent 削除: $LAUNCH_AGENT_PLIST"
-    else
+    if [ ! -f "$LAUNCH_AGENT_PLIST" ] && [ ! -f "$HOME/Library/LaunchAgents/com.fix-chrome-diskwrite.opt-guide-cleanup.plist" ]; then
       echo "  LaunchAgent: 登録されていません"
     fi
   fi
@@ -88,6 +99,68 @@ fi
 if pgrep -qx "Google Chrome"; then
   echo "Error: Chrome を終了してから再実行してください。"
   exit 1
+fi
+
+# --- クラッシュループ修復 (全プロファイル対応) ---
+if $FIX_CRASH_LOOP; then
+  echo "クラッシュループ修復"
+  echo "---"
+
+  # 全プロファイルを自動検出
+  profile_dirs=("$CHROME_BASE/Default")
+  for p in "$CHROME_BASE"/Profile\ *; do
+    [ -d "$p" ] && profile_dirs+=("$p")
+  done
+
+  ts=$(date +%Y%m%d%H%M%S)
+
+  for profile_dir in "${profile_dirs[@]}"; do
+    profile_name=$(basename "$profile_dir")
+    prefs_file="$profile_dir/Preferences"
+    sessions_dir="$profile_dir/Sessions"
+
+    # Preferences の exit_type をリセット
+    if [ -f "$prefs_file" ]; then
+      exit_type=$(python3 -c "
+import json
+with open('$prefs_file') as f:
+    prefs = json.load(f)
+print(prefs.get('profile', {}).get('exit_type', 'unknown'))
+" 2>/dev/null)
+
+      if [ "$exit_type" = "Crashed" ]; then
+        python3 -c "
+import json
+with open('$prefs_file', 'r') as f:
+    prefs = json.load(f)
+prefs.setdefault('profile', {})['exit_type'] = 'Normal'
+prefs['profile']['exited_cleanly'] = True
+with open('$prefs_file', 'w') as f:
+    json.dump(prefs, f)
+"
+        echo "  [$profile_name] 修復: exit_type を Crashed → Normal にリセット"
+      else
+        echo "  [$profile_name] スキップ: exit_type = $exit_type"
+      fi
+    fi
+
+    # セッションファイルをバックアップ・削除
+    if [ -d "$sessions_dir" ]; then
+      session_count=$(find "$sessions_dir" -name "Session_*" -o -name "Tabs_*" 2>/dev/null | wc -l | tr -d ' ')
+      if [ "$session_count" -gt 0 ]; then
+        backup_dir="${sessions_dir}_backup_${ts}"
+        mkdir -p "$backup_dir"
+        cp "$sessions_dir"/Session_* "$sessions_dir"/Tabs_* "$backup_dir/" 2>/dev/null
+        rm -f "$sessions_dir"/Session_* "$sessions_dir"/Tabs_*
+        echo "  [$profile_name] 削除: セッションファイル ${session_count} 件 (バックアップ: Sessions_backup_${ts})"
+      fi
+    fi
+  done
+
+  echo "---"
+  echo "完了。Chrome を再起動してください。"
+  echo "以前のタブは chrome://history から個別に復元できます。"
+  exit 0
 fi
 
 echo "Chrome ディスク書き込み制限超過クラッシュ防止"
@@ -123,8 +196,29 @@ if $OPT_GUIDE; then
     echo "  スキップ: optimization_guide_model_store (存在しない)"
   fi
 
-  # 4. (オプション) LaunchAgent で毎時自動削除
+  # 4. (オプション) LaunchAgent で定期キャッシュクリーンアップ
+  #    Chrome 未起動時のみ、閾値 (100MB) を超えたキャッシュを自動削除
   if $SCHEDULE; then
+    # cleanup.sh をインストール
+    mkdir -p "$(dirname "$CLEANUP_SCRIPT")"
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -f "$SCRIPT_DIR/cleanup.sh" ]; then
+      cp "$SCRIPT_DIR/cleanup.sh" "$CLEANUP_SCRIPT"
+    else
+      # curl 経由で実行された場合はダウンロード
+      curl -fsSL "https://raw.githubusercontent.com/kanketsu-jp/fix-chrome-diskwrite/main/bin/cleanup.sh" -o "$CLEANUP_SCRIPT"
+    fi
+    chmod +x "$CLEANUP_SCRIPT"
+    echo "  スクリプト配置: $CLEANUP_SCRIPT"
+
+    # 旧 LaunchAgent の削除 (ラベル名が変わった場合)
+    OLD_LABEL="com.fix-chrome-diskwrite.opt-guide-cleanup"
+    OLD_PLIST="$HOME/Library/LaunchAgents/$OLD_LABEL.plist"
+    if [ -f "$OLD_PLIST" ]; then
+      launchctl bootout "gui/$(id -u)" "$OLD_PLIST" 2>/dev/null || true
+      rm -f "$OLD_PLIST"
+    fi
+
     mkdir -p "$HOME/Library/LaunchAgents"
     cat > "$LAUNCH_AGENT_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -135,9 +229,8 @@ if $OPT_GUIDE; then
   <string>${LAUNCH_AGENT_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/rm</string>
-    <string>-rf</string>
-    <string>${OPT_GUIDE_DIR}</string>
+    <string>/bin/bash</string>
+    <string>${CLEANUP_SCRIPT}</string>
   </array>
   <key>StartInterval</key>
   <integer>3600</integer>
@@ -150,7 +243,7 @@ if $OPT_GUIDE; then
 PLIST
     launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PLIST"
-    echo "  LaunchAgent 登録: 1時間ごとに optimization_guide_model_store を自動削除"
+    echo "  LaunchAgent 登録: 1時間ごとにキャッシュクリーンアップ (閾値: 100MB)"
   fi
 fi
 
