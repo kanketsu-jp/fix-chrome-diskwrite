@@ -21,6 +21,8 @@ npx fix-chrome-diskwrite --full --opt-guide --schedule
 4. Enterprise Policy `GenAILocalFoundationalModelSettings=1` で確実に停止できる
 5. Gemini Nano 以外のコンポーネント（ScreenAI、TTS 等）の書き込みでも制限超過する場合がある → `--full` オプションで対策可能
 6. 一度クラッシュすると「起動 → セッション復元 → 再クラッシュ」のループに陥ることがある → `--fix-crash-loop` で修復可能
+7. Chrome の対策を全て適用してもまだ落ちる場合、**Google Drive など他アプリが disk writes の制限を消費している**可能性がある
+8. それでも落ちる場合、**拡張機能の競合**が原因の可能性がある（特に同種の拡張機能の重複インストール）
 :::
 
 ## 背景
@@ -380,10 +382,84 @@ npx fix-chrome-diskwrite --full --opt-guide --schedule
 | `PasswordManagerEnabled` | false | 内蔵パスワードマネージャー無効化 |
 | `AutofillAddressEnabled` | false | 住所自動入力無効化 |
 | `AutofillCreditCardEnabled` | false | クレジットカード自動入力無効化 |
+| `DiskCacheSize` | 52428800 | HTTP キャッシュ上限を 50MB に制限 |
+| `MediaCacheSize` | 33554432 | メディアキャッシュ上限を 32MB に制限 |
 
-加えて `screen_ai/`、`WasmTtsEngine/`、`component_crx_cache/`、`GraphiteDawnCache/`、`BrowserMetrics/` を削除する。
+加えて `screen_ai/`、`WasmTtsEngine/`、`component_crx_cache/`、`GraphiteDawnCache/`、`BrowserMetrics/` と `~/Library/Caches/Google/Chrome/` を削除する。
+
+### さらに落ちるケース: ブラウザキャッシュ
+
+`--full` を適用しても、macOS 再起動直後にクラッシュするケースがあった。調べると `~/Library/Application Support/Google/Chrome/` とは**別の場所**にブラウザキャッシュが存在していた。
+
+```bash
+du -sh ~/Library/Caches/Google/Chrome/
+# 4.2G
+```
+
+`~/Library/Caches/Google/Chrome/` に HTTP キャッシュ（`Cache/`）と JavaScript コンパイルキャッシュ（`Code Cache/`）が格納されており、プロファイルごとに 1〜2GB になっていた。Chrome 起動時にこれらの読み書きが disk writes カウンタに加算される。
+
+この場所は `Application Support` 配下ではないため、今まで見落としていた。v3.0.0 でこのキャッシュの削除も `--full` と定期クリーンアップの対象に追加した。
+
+削除しても履歴・ブックマーク・パスワード等には影響しない。Web サイトの読み込みが一時的に遅くなるだけで、アクセスすれば自動で再キャッシュされる。
 
 適用後、Chrome が落ちなくなった。
+
+### それでもまだ落ちるケース: Google Drive
+
+ここまでの対策を全て適用しても、まだ Chrome が落ちるケースがあった。Activity Monitor を確認すると、Chrome の Bytes Written は 504.7MB なのに対し、**Google Drive が 11.88GB** を書き込んでいた。
+
+クラッシュレポートにも Google Drive が `disk writes` 制限を超過した記録があった。
+
+```
+Command:          Google Drive
+Event:            disk writes
+Writes:           8589.94 MB of file backed memory dirtied over 69133 seconds
+```
+
+19 時間で 8.6GB。Chrome の対策で Chrome 自体の書き込みは 500MB 程度に抑えられていたが、**Google Drive が同じ macOS の書き込みバジェットを食い尽くしていた**。
+
+プロセスごとの書き込み量を `proc_pid_rusage` API で調べた結果がこれ。
+
+| プロセス | logical_writes | 制限消費率 |
+|---|---|---|
+| **fileproviderd** | **16.76 GB** | **799%** |
+| Figma | 2.15 GB | 103% |
+| Google Chrome | 454.8 MB | **21%** |
+
+`fileproviderd` は macOS が Google Drive のストリーミングモードを管理するシステムプロセス。Google Drive アプリを終了しても、macOS の `fileproviderd` はバックグラウンドで動き続ける。**Chrome の書き込みは全体のわずか 1.3% だった**。
+
+> でも、なんでストリーミングモードなのに 16GB も書き込む？
+
+Google Drive の設定を確認すると、既にストリーミングモード（ミラーリングではない）だった。原因は**共有ドライブの数**。15 個以上の共有ドライブが登録されており、それぞれのメタデータ同期が常時走っていた。さらに 2 アカウント分なので書き込みは倍になる。
+
+対策として Google Drive の「Manage shared drives」で使っていない共有ドライブの同期を OFF にし、最終的に Google Drive アプリ自体をアンインストールした。結果、書き込み速度が **55.4 MB/s → 865 KB/s（1/64）** に激減した。
+
+:::message alert
+**Google Drive を使っている場合の注意:** Chrome の disk writes 対策を全て適用してもまだ落ちる場合、Activity Monitor の Disk タブで Google Drive の Bytes Written を確認すること。ストリーミングモードでも、共有ドライブが多いと macOS の `fileproviderd` が大量の書き込みを行う。
+:::
+
+### それでもまだ落ちるケース: 拡張機能の競合
+
+上記の対策を全て適用し、Google Drive も対処済みなのにまだ落ちるケースがあった。
+
+詳細なログ調査（Chrome `--enable-logging=stderr --v=2` で 34,000 行以上、macOS system log、プロセス監視）を行った結果、Chrome は FATAL エラーもシグナルもカーネル kill もなく**無言で消えていた**。Crashpad にもダンプが生成されない。
+
+切り分けのために Enterprise Policy を全て削除しても変わらず。しかし**拡張機能を整理したところクラッシュが止まった**。その後 Policy を全件復元しても安定動作。
+
+犯人の特定には至らなかったが、最も疑わしいのは以下。
+
+- **不明な拡張機能**（Chrome Web Store に存在しない ID が両プロファイルにインストールされていた）
+- **Adobe Acrobat** — 全ページで content script を注入し、起動直後に 12MB の書き込みを行う
+- **正体不明の拡張機能**（Chrome Web Store に存在しない ID）— 両プロファイルにインストールされていた
+
+:::message
+**拡張機能を整理するときのポイント:**
+
+- 同じ機能の拡張機能を複数入れない（特に 1Password の通常版と Nightly 版など）
+- 使っていない拡張機能は削除する
+- 「拡張機能をクリックしたとき」モードに変更できるものは変更する（全ページでの content script 注入を防げる）
+- Chrome Web Store に存在しない拡張機能がインストールされていたら削除する
+:::
 
 ## もうちょっと深掘ってみた
 
@@ -444,7 +520,9 @@ Footprint: 237.78 MB -> 389.69 MB (+151.91 MB) (max 412.05 MB)
 2. 犯人は Chrome に同梱される **Gemini Nano の AI モデル**（4GB の `weights.bin`）
 3. Enterprise Policy `GenAILocalFoundationalModelSettings=1` で確実に停止できる
 4. 一度クラッシュすると **セッション復元によるクラッシュループ** に陥ることがある → `--fix-crash-loop` で修復
-5. この問題は自分固有ではなく、世界中で報告されている
+5. Chrome の対策を全て適用しても落ちる場合、**Google Drive など他アプリの書き込み**が macOS の制限を消費している可能性がある
+6. それでも落ちる場合、**拡張機能の競合**（同種拡張の重複、corrupted 状態）が原因の可能性がある
+7. この問題は自分固有ではなく、世界中で報告されている
 :::
 
 同じ症状で悩んでいる方の参考になれば。

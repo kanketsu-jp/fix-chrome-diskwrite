@@ -32,6 +32,8 @@ Chrome は以下のデータを自動ダウンロード・書き込みし、macO
 4. ScreenAI・TTS・バックグラウンドモードを無効化
 5. Chrome 内蔵パスワードマネージャー・自動入力を無効化（macOS の `SafariPlatformSupport.Helper` クラッシュ防止）
 6. 追加コンポーネントデータの削除（screen_ai, WasmTtsEngine, component_crx_cache 等）
+7. ブラウザキャッシュの削除（`~/Library/Caches/Google/Chrome/` — HTTP キャッシュ・Code Cache）
+8. ディスクキャッシュサイズの制限（`DiskCacheSize=50MB`, `MediaCacheSize=32MB`）
 
 > **注意**: Chrome 内蔵パスワードマネージャーの無効化は 1Password 等の拡張機能に影響しません。
 
@@ -72,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/kanketsu-jp/fix-chrome-diskwrite/ma
 | (なし) | Gemini Nano の DL 禁止 + 既存モデル削除 |
 | `--full` | コンポーネント更新停止・ScreenAI/TTS 無効化・内蔵パスワードマネージャー無効化・追加データ削除 |
 | `--opt-guide` | `optimization_guide_model_store` も削除 |
-| `--schedule` | LaunchAgent で 1 時間ごとにキャッシュを自動クリーンアップ（`--opt-guide` と併用）。Chrome 未起動時のみ、100MB 超のキャッシュを削除 |
+| `--schedule` | LaunchAgent で 1 時間ごとにキャッシュを自動クリーンアップ（`--opt-guide` と併用）。Chrome 未起動時は 100MB 超のキャッシュを削除。Chrome 起動中でもクラッシュを検知した場合は壊れたキャッシュを自動修復 |
 | `--fix-crash-loop` | クラッシュループを修復（全プロファイルの `exit_type` リセット + セッションファイル削除） |
 | `--undo` | すべての設定を元に戻す（`--full`, `--opt-guide --schedule` と併用可） |
 
@@ -97,7 +99,9 @@ npx fix-chrome-diskwrite --fix-crash-loop
 - `optimization_guide_model_store`、`GraphiteDawnCache`、`BrowserMetrics` 等の共有キャッシュ
 - 各プロファイルの `Service Worker/CacheStorage`、`DawnWebGPUCache`、`DIPS-wal`
 
-Chrome が起動中の場合はスキップされる（起動中に削除するとタブがクラッシュするため）。各ディレクトリが 100MB を超えた場合のみ削除される。Chrome は次回起動時に必要なキャッシュを小さいサイズから再生成する。
+Chrome が起動中の場合は通常のクリーンアップはスキップされる（起動中に削除するとタブがクラッシュするため）。各ディレクトリが 100MB を超えた場合のみ削除される。Chrome は次回起動時に必要なキャッシュを小さいサイズから再生成する。
+
+**クラッシュ後の自動修復**: Chrome 起動中でも、Preferences の `exit_type` が `Crashed` の場合は壊れたキャッシュ（HTTP Cache、Code Cache、Service Worker CacheStorage、DawnWebGPUCache 等）を自動削除する。これにより「クラッシュ → 壊れたキャッシュで再クラッシュ」のループを防止する。
 
 ログは `~/Library/Logs/fix-chrome-diskwrite-cleanup.log` に記録される。
 

@@ -33,7 +33,6 @@ POLICY_KEY="GenAILocalFoundationalModelSettings"
 LAUNCH_AGENT_LABEL="com.fix-chrome-diskwrite.cleanup"
 LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/$LAUNCH_AGENT_LABEL.plist"
 CLEANUP_SCRIPT="$HOME/.local/bin/fix-chrome-diskwrite-cleanup.sh"
-
 # --full で削除する追加コンポーネント
 EXTRA_DIRS=(
   "$CHROME_BASE/screen_ai"
@@ -67,7 +66,7 @@ if $UNDO; then
     echo "  Policy 削除: $POLICY_KEY" || \
     echo "  Policy: 設定されていません"
   if $FULL; then
-    for key in ComponentUpdatesEnabled ScreenAIEnabled TextToSpeechEnabled BackgroundModeEnabled PasswordManagerEnabled AutofillAddressEnabled AutofillCreditCardEnabled; do
+    for key in ComponentUpdatesEnabled ScreenAIEnabled TextToSpeechEnabled BackgroundModeEnabled PasswordManagerEnabled AutofillAddressEnabled AutofillCreditCardEnabled DiskCacheSize MediaCacheSize ForceGpuMemAvailableMb RendererProcessLimit TotalMemoryLimitMb HighEfficiencyModeEnabled IntensiveWakeUpThrottlingEnabled TabDiscardingExceptions SitePerProcess; do
       defaults delete com.google.Chrome "$key" 2>/dev/null && \
         echo "  Policy 削除: $key" || true
     done
@@ -280,6 +279,33 @@ if $FULL; then
   echo "  Policy 設定: AutofillCreditCardEnabled = false"
   echo "  ※ 1Password 等の拡張機能には影響しません"
 
+  # 5f. ディスクキャッシュサイズの制限
+  #     デフォルトではプロファイルごとに 1-2GB まで膨らむ。
+  #     50MB / 32MB に制限することで、キャッシュの肥大化を防止する。
+  defaults write com.google.Chrome DiskCacheSize -integer 52428800
+  defaults write com.google.Chrome MediaCacheSize -integer 33554432
+  echo "  Policy 設定: DiskCacheSize = 50MB (HTTP キャッシュ上限)"
+  echo "  Policy 設定: MediaCacheSize = 32MB (メディアキャッシュ上限)"
+
+  # 5f-2. タブの省エネ設定
+  #       非アクティブタブを積極的に破棄し、バックグラウンドの JS 実行を制限する。
+  #       これにより Service Worker やタイマーによるネットワーク通信が減り、disk writes が削減される。
+  defaults write com.google.Chrome HighEfficiencyModeEnabled -bool true
+  defaults write com.google.Chrome IntensiveWakeUpThrottlingEnabled -bool true
+  echo "  Policy 設定: HighEfficiencyModeEnabled = true (メモリセーバー有効)"
+  echo "  Policy 設定: IntensiveWakeUpThrottlingEnabled = true (バックグラウンドタブ制限)"
+
+  # 5g. GPU・メモリ安定化 (Renderer クラッシュ防止)
+  #     GPU プロセスのメモリ不足によるクラッシュを防止する。
+  #     Chrome はデフォルトで GPU 利用可能メモリを保守的に見積もるため、
+  #     Apple Silicon の統合メモリでは不足してクラッシュすることがある。
+  defaults write com.google.Chrome ForceGpuMemAvailableMb -integer 4096
+  echo "  Policy 設定: ForceGpuMemAvailableMb = 4096MB (GPU メモリ上限)"
+  defaults write com.google.Chrome RendererProcessLimit -integer 20
+  echo "  Policy 設定: RendererProcessLimit = 20 (Renderer プロセス数上限)"
+  defaults write com.google.Chrome TotalMemoryLimitMb -integer 16384
+  echo "  Policy 設定: TotalMemoryLimitMb = 16384MB (Chrome 全体メモリ上限)"
+
   # 5f. 追加コンポーネントのデータ削除
   for dir in "${EXTRA_DIRS[@]}"; do
     if [ -d "$dir" ]; then
@@ -289,6 +315,16 @@ if $FULL; then
     fi
   done
   rm -f "$CHROME_BASE/BrowserMetrics-spare.pma"
+
+  # 5g. ブラウザキャッシュの削除 (~/Library/Caches/Google/Chrome/)
+  #     Application Support とは別の場所にある HTTP/Code Cache。
+  #     これが数 GB に膨らみ、起動時の読み書きで disk writes 制限を超過する主因となる。
+  CHROME_CACHE="$HOME/Library/Caches/Google/Chrome"
+  if [ -d "$CHROME_CACHE" ]; then
+    size=$(du -sh "$CHROME_CACHE" 2>/dev/null | cut -f1)
+    rm -rf "$CHROME_CACHE"
+    echo "  削除: ~/Library/Caches/Google/Chrome/ ($size)"
+  fi
 fi
 
 echo "---"
