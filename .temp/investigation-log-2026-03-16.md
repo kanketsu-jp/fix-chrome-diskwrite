@@ -164,11 +164,18 @@ Meet も Claude Computer Use も使っていないのにクラッシュが発生
 - FATAL/シグナル: なし
 - 前回のクラッシュでキャッシュが壊れたまま再起動したため、不整合が蓄積してクラッシュ
 
-#### 対策
-- cleanup.sh にクラッシュ後自動修復機能を追加
-- 1時間ごとの LaunchAgent が `exit_type=Crashed` を検知
-- Chrome 起動中でも壊れたキャッシュ（HTTP Cache、Code Cache、Service Worker CacheStorage、DawnWebGPUCache）を自動削除
-- 共有キャッシュ（GraphiteDawnCache、BrowserMetrics）も掃除
+#### 対策（初版 → 改良版）
+- **初版**: cleanup.sh にクラッシュ後自動修復機能を追加。Chrome 起動中でも `exit_type=Crashed` を検知してキャッシュを削除
+- **問題発覚**: Chrome 起動中にキャッシュを削除すると、Chrome のメモリ上のキャッシュインデックスと実ファイルが不整合になり `Cannot stat` エラーが 690 件発生。**逆にもっさりする**
+- **改良版**: Chrome 起動中は `exit_type` リセットのみ（クラッシュループ防止）。キャッシュ削除は Chrome 未起動時にのみ実行
+- LaunchAgent の間隔を 1 時間 → **2 分**に短縮。Chrome 終了後、最大 2 分以内にキャッシュが自動修復される
+
+### 13. Chrome Logging.app 廃止、cleanup.sh に一本化 (3/18)
+
+- Chrome Logging.app（`~/Applications/Chrome Logging.app/`）を削除
+- `/tmp/chrome-crash-investigation/` も削除
+- クラッシュ後の修復は cleanup.sh（2 分間隔 LaunchAgent）に完全委任
+- ゴミ掃除後はクラッシュしていない
 
 ### 結論の最終更新
 
@@ -176,37 +183,18 @@ Chrome クラッシュの原因は **5 つ**:
 1. **Chrome 自体の disk writes** — Gemini Nano、コンポーネント、キャッシュ（対策済み）
 2. **Google Drive の大量書き込み** — ストリーミングモードでもメタデータ同期で 8.6GB+（対策済み）
 3. **拡張機能の過多** — 不要な拡張機能を削除で解決（対策済み）
-4. **macOS ARM GPU パイプラインバグ** — Meet タブ共有、Claude Computer Use で発生（Chrome 側修正待ち）
-5. **キャッシュ破損による連鎖クラッシュ** — cleanup.sh のクラッシュ検知で自動修復（対策済み）
+4. **macOS ARM GPU パイプラインバグ** — Meet タブ共有、Claude Computer Use で発生（Chrome のアップデート待ち）
+5. **キャッシュ破損による連鎖クラッシュ** — cleanup.sh の 2 分間隔自動修復で対策済み
 
-## 現在の PC 上の状態 (3/18 時点)
+## 現在の PC 上の状態 (3/18 最終)
 
 ### 常駐プロセス
-- `com.fix-chrome-diskwrite.cleanup` LaunchAgent — 1 時間ごとに cleanup.sh を実行
-- `~/.local/bin/fix-chrome-diskwrite-cleanup.sh` — クリーンアップスクリプト本体（クラッシュ後自動修復機能付き）
+- `com.fix-chrome-diskwrite.cleanup` LaunchAgent — **2 分ごと**に cleanup.sh を実行
+- `~/.local/bin/fix-chrome-diskwrite-cleanup.sh` — クリーンアップスクリプト本体
+  - Chrome 未起動時: クラッシュ後のキャッシュ修復 + 100MB 超のキャッシュ削除
+  - Chrome 起動中: `exit_type` リセットのみ（キャッシュは触らない）
 - `~/Library/Logs/fix-chrome-diskwrite-cleanup.log` — ログ
 
-### Chrome Enterprise Policy（15 件）
-| ポリシー | 値 | 目的 |
-|---|---|---|
-| GenAILocalFoundationalModelSettings | 1 | Gemini Nano DL 禁止 |
-| ComponentUpdatesEnabled | false | コンポーネント自動更新停止 |
-| ScreenAIEnabled | false | ScreenAI 無効化 |
-| TextToSpeechEnabled | false | TTS 無効化 |
-| BackgroundModeEnabled | false | バックグラウンド書き込み防止 |
-| PasswordManagerEnabled | false | 内蔵パスワードマネージャー無効化 |
-| AutofillAddressEnabled | false | 住所自動入力無効化 |
-| AutofillCreditCardEnabled | false | クレジットカード自動入力無効化 |
-| DiskCacheSize | 52428800 | HTTP キャッシュ 50MB 上限 |
-| MediaCacheSize | 33554432 | メディアキャッシュ 32MB 上限 |
-| ForceGpuMemAvailableMb | 4096 | GPU メモリ上限拡大 |
-| RendererProcessLimit | 20 | Renderer プロセス数制限 |
-| TotalMemoryLimitMb | 16384 | Chrome 全体メモリ 16GB 上限 |
-| HighEfficiencyModeEnabled | true | メモリセーバー有効 |
-| IntensiveWakeUpThrottlingEnabled | true | バックグラウンドタブ制限 |
-
-### 削除済み拡張機能
-バックアップは削除済み。以下の拡張機能は再インストールしていない:
-- Adobe Acrobat, ChatGPT search, Claude in Chrome, GoFullPage
-- React Developer Tools, Google Docs Offline, Application Launcher for Drive
-- Send to Kindle, Tag Assistant, 不明な拡張機能 (`ioijepjb...`)
+### 削除済み
+- `~/Applications/Chrome Logging.app/` — 廃止・削除
+- `/tmp/chrome-crash-investigation/` — 廃止・削除

@@ -74,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/kanketsu-jp/fix-chrome-diskwrite/ma
 | (なし) | Gemini Nano の DL 禁止 + 既存モデル削除 |
 | `--full` | コンポーネント更新停止・ScreenAI/TTS 無効化・内蔵パスワードマネージャー無効化・追加データ削除 |
 | `--opt-guide` | `optimization_guide_model_store` も削除 |
-| `--schedule` | LaunchAgent で 1 時間ごとにキャッシュを自動クリーンアップ（`--opt-guide` と併用）。Chrome 未起動時は 100MB 超のキャッシュを削除。Chrome 起動中でもクラッシュを検知した場合は壊れたキャッシュを自動修復 |
+| `--schedule` | LaunchAgent で 2 分ごとにキャッシュを自動クリーンアップ（`--opt-guide` と併用）。Chrome 未起動時は 100MB 超のキャッシュを削除+クラッシュ後の壊れたキャッシュを自動修復。Chrome 起動中はクラッシュループ防止のみ |
 | `--fix-crash-loop` | クラッシュループを修復（全プロファイルの `exit_type` リセット + セッションファイル削除） |
 | `--undo` | すべての設定を元に戻す（`--full`, `--opt-guide --schedule` と併用可） |
 
@@ -94,14 +94,10 @@ npx fix-chrome-diskwrite --fix-crash-loop
 
 ### 定期キャッシュクリーンアップ（`--schedule`）
 
-`--opt-guide --schedule` を指定すると、1 時間ごとに以下を自動クリーンアップする LaunchAgent が登録される:
+`--opt-guide --schedule` を指定すると、2 分ごとに以下を自動実行する LaunchAgent が登録される:
 
-- `optimization_guide_model_store`、`GraphiteDawnCache`、`BrowserMetrics` 等の共有キャッシュ
-- 各プロファイルの `Service Worker/CacheStorage`、`DawnWebGPUCache`、`DIPS-wal`
-
-Chrome が起動中の場合は通常のクリーンアップはスキップされる（起動中に削除するとタブがクラッシュするため）。各ディレクトリが 100MB を超えた場合のみ削除される。Chrome は次回起動時に必要なキャッシュを小さいサイズから再生成する。
-
-**クラッシュ後の自動修復**: Chrome 起動中でも、Preferences の `exit_type` が `Crashed` の場合は壊れたキャッシュ（HTTP Cache、Code Cache、Service Worker CacheStorage、DawnWebGPUCache 等）を自動削除する。これにより「クラッシュ → 壊れたキャッシュで再クラッシュ」のループを防止する。
+- **Chrome 未起動時**: `optimization_guide_model_store`、`GraphiteDawnCache`、`BrowserMetrics` 等の共有キャッシュと、各プロファイルの `Service Worker/CacheStorage`、`DawnWebGPUCache`、`DIPS-wal` をクリーンアップ（各ディレクトリが 100MB を超えた場合のみ削除）。クラッシュが検知された場合は壊れたキャッシュ（HTTP Cache、Code Cache 等）も自動修復する。Chrome は次回起動時に必要なキャッシュを小さいサイズから再生成する。
+- **Chrome 起動中**: クラッシュが検知された場合は `exit_type` を `Normal` にリセットしてクラッシュループを防止する（キャッシュは起動中に削除すると逆効果のため触らない）。クラッシュが検知されなければ何もしない。
 
 ログは `~/Library/Logs/fix-chrome-diskwrite-cleanup.log` に記録される。
 

@@ -232,7 +232,7 @@ if $OPT_GUIDE; then
     <string>${CLEANUP_SCRIPT}</string>
   </array>
   <key>StartInterval</key>
-  <integer>3600</integer>
+  <integer>120</integer>
   <key>StandardOutPath</key>
   <string>/dev/null</string>
   <key>StandardErrorPath</key>
@@ -242,7 +242,7 @@ if $OPT_GUIDE; then
 PLIST
     launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PLIST"
-    echo "  LaunchAgent 登録: 1時間ごとにキャッシュクリーンアップ (閾値: 100MB)"
+    echo "  LaunchAgent 登録: 2分ごとにキャッシュクリーンアップ (閾値: 100MB)"
   fi
 fi
 

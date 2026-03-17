@@ -3,10 +3,16 @@
 ## プロジェクト構成
 
 - `bin/fix.sh` — メインスクリプト（Enterprise Policy 設定、データ削除、クラッシュループ修復）
-- `bin/cleanup.sh` — 定期クリーンアップスクリプト（LaunchAgent から呼び出される）
+- `bin/cleanup.sh` — 定期クリーンアップスクリプト（LaunchAgent から呼び出される、クラッシュ後自動修復機能付き）
 - `cli.js` — npx エントリポイント（fix.sh を呼び出すだけ）
 - `.temp/blog.md` — Zenn 記事の原稿
 - README.md — npm パッケージの README
+
+## ユーザー PC 上のファイル（リポジトリ外）
+
+- `~/.local/bin/fix-chrome-diskwrite-cleanup.sh` — cleanup.sh のインストール先
+- `~/Library/LaunchAgents/com.fix-chrome-diskwrite.cleanup.plist` — LaunchAgent（2 分間隔）
+- `~/Library/Logs/fix-chrome-diskwrite-cleanup.log` — クリーンアップログ
 
 ## 記事の執筆ルール
 
